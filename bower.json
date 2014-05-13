@@ -1,0 +1,27 @@
+{
+  "name": "goinstant-rich-text-editor",
+  "main": "dist/rich-text-editor.js",
+  "version": "1.0.0",
+  "homepage": "https://github.com/goinstant/rich-text-editor",
+  "authors": [
+    "GoInstant",
+    "a salesforce.com company"
+  ],
+
+  "description": "GoInstant Widget for Rich Text Editing",
+  "keywords": [
+    "GoInstant",
+    "widget",
+    "rich-text-editor"
+  ],
+
+  "license": "BSD",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
+

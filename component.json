@@ -1,0 +1,41 @@
+{
+  "name": "rich-text-editor",
+  "repo": "goinstant/rich-text-editor",
+  "description": "GoInstant Widget for Rich Text Editing",
+  "version": "1.0.0",
+  "keywords": [
+    "GoInstant",
+    "widget",
+    "rich-text-editor"
+  ],
+
+  "dependencies": {
+    "component/classes": "1.1.4",
+    "lodash/lodash": "2.3.0",
+    "goinstant/usercache": "v1.0.0"
+  },
+
+  "development": {
+    "visionmedia/mocha": "*",
+    "component/jquery": "*"
+  },
+
+  "license": "BSD",
+
+  "main": "index.js",
+
+  "scripts": [
+    "index.js",
+    "lib/rich_text_editor.js",
+    "vendor/quill.js"
+  ],
+
+  "styles": [
+    "vendor/quill.snow.css",
+    "rich-text-editor.css"
+  ],
+
+  "templates": [
+    "templates/toolbar.html"
+  ]
+}
