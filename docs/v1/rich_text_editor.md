@@ -7,7 +7,7 @@ collaborative text editing inside a room of your application. It's based, in
 part, off [Quill](http://quilljs.com), an open source, extensible rich text
 editor (built by GoInstant team members).
 
-The Rich Text Editor widget synchronizes content using [OT
+The Rich Text Editor widget synchronizes content using GoInstant's [OT
   API](https://developers.goinstant.com/v1/javascript_api/ot/index.html) and
   displays the cursors of remote collaborators.
 
