@@ -93,6 +93,7 @@ Creates the RichTextEditor instance with customizable options.
 | An object with the following properties: |
 | - `room` is the [Room](https://developers.goinstant.com/v1/rooms/index.html).|
 | - `containerId` is the id of the DOM element that the widget will render in.|
+| - `cursorTimeout` [**default: 3000**] is the [Number](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number) of milliseconds that remote cursors remain visible upon inactivity.|
 
 ### Example
 
