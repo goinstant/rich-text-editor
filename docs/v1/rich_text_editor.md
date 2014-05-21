@@ -93,6 +93,7 @@ Creates the RichTextEditor instance with customizable options.
 | An object with the following properties: |
 | - `room` is the [Room](https://developers.goinstant.com/v1/rooms/index.html).|
 | - `containerId` is the id of the DOM element that the widget will render in.|
+| - `otName` [**default: "rich-text-document"**] is the [String](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/String) name of the [OT key](https://developers.goinstant.com/v1/javascript_api/ot/index.html) that you want to store the contents of the editor in.|
 | - `formats` [**optional**] an array of formats to include in the toolbar. Valid formats include: bold, italic, underline, strike, link, image, font, color, background, size, align.|
 | - `cursorTimeout` [**default: 3000**] is the [Number](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Number) of milliseconds that remote cursors remain visible upon inactivity.|
 
@@ -163,4 +164,4 @@ The Rich Text Editor Widget is supported on the latest versions of Chrome, Firef
 
 ### How do I set and retrieve document contents?
 
-See the [OT guide](https://developers.goinstant.com/v1/javascript_api/ot/index.html).
+See the [OT guide](https://developers.goinstant.com/v1/javascript_api/ot/index.html). Instantiate an OT key with the `otName` you provided in the widget [constructor](#constructor), or use the default name, "rich-text-document".
