@@ -36,6 +36,16 @@
   ],
 
   "templates": [
-    "templates/toolbar.html"
+    "templates/align.html",
+    "templates/background.html",
+    "templates/bold.html",
+    "templates/color.html",
+    "templates/font.html",
+    "templates/image.html",
+    "templates/italic.html",
+    "templates/link.html",
+    "templates/size.html",
+    "templates/strike.html",
+    "templates/underline.html"
   ]
 }
