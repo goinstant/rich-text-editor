@@ -11943,7 +11943,7 @@ module.exports=_dereq_('Fq7WE+');
 },{}],18:[function(_dereq_,module,exports){
 module.exports={
   "name": "quilljs",
-  "version": "0.13.4",
+  "version": "0.13.5-pre",
   "description": "Cross browser rich text editor",
   "author": "Jason Chen <jhchen7@gmail.com>",
   "homepage": "http://quilljs.com",
@@ -12531,6 +12531,11 @@ DOM = {
       return DOM.triggerEvent(select, 'change');
     }
   },
+  setAttributes: function(node, attributes) {
+    return _.each(attributes, function(value, name) {
+      return node.setAttribute(name, value);
+    });
+  },
   setStyles: function(node, styles) {
     var styleString;
     styleString = _.map(styles, function(style, name) {
@@ -12663,7 +12668,7 @@ Editor = (function() {
     this.iframeContainer = iframeContainer;
     this.quill = quill;
     this.options = options != null ? options : {};
-    this.renderer = new Renderer(this.iframeContainer, this.quill, this.options);
+    this.renderer = new Renderer(this.iframeContainer, this.options);
     this.root = this.renderer.root;
     this.doc = new Document(this.root, this.options);
     this.delta = this.doc.toDelta();
@@ -14467,8 +14472,9 @@ MultiCursor = (function(_super) {
           return;
         }
         if (cursor.dirty || force) {
-          return _this._updateCursor(cursor);
+          _this._updateCursor(cursor);
         }
+        return true;
       };
     })(this));
   };
@@ -14522,6 +14528,7 @@ MultiCursor = (function(_super) {
 
   MultiCursor.prototype._updateCursor = function(cursor) {
     var didSplit, guide, leaf, leftNode, offset, rightNode, _ref, _ref1;
+    this.quill.editor.checkUpdate();
     _ref = this.quill.editor.doc.findLeafAt(cursor.index, true), leaf = _ref[0], offset = _ref[1];
     guide = this.container.ownerDocument.createElement('span');
     if (leaf != null) {
@@ -14537,7 +14544,8 @@ MultiCursor = (function(_super) {
     if (didSplit) {
       DOM.normalize(leaf.node.parentNode);
     }
-    return cursor.dirty = false;
+    cursor.dirty = false;
+    return this.quill.editor.selection.update('silent');
   };
 
   return MultiCursor;
@@ -15239,22 +15247,17 @@ Normalizer = {
   pullBlocks: function(lineNode) {
     var curNode, _results;
     curNode = lineNode.firstChild;
-    if (curNode == null) {
-      return;
-    }
-    if (DOM.BLOCK_TAGS[curNode.tagName] != null) {
-      if (curNode.nextSibling != null) {
-        Utils.splitAncestors(curNode.nextSibling, lineNode.parentNode);
-      }
-      DOM.unwrap(curNode);
-      Normalizer.pullBlocks(lineNode);
-    }
-    curNode = curNode.nextSibling;
     _results = [];
     while (curNode != null) {
       if (DOM.BLOCK_TAGS[curNode.tagName] != null) {
-        lineNode = Utils.splitAncestors(curNode, lineNode.parentNode);
-        break;
+        if (curNode.previousSibling != null) {
+          Utils.splitAncestors(curNode, lineNode.parentNode);
+        }
+        if (curNode.nextSibling != null) {
+          Utils.splitAncestors(curNode.nextSibling, lineNode.parentNode);
+        }
+        DOM.unwrap(curNode);
+        Normalizer.pullBlocks(lineNode);
       }
       _results.push(curNode = curNode.nextSibling);
     }
@@ -15397,7 +15400,6 @@ Quill = (function(_super) {
     MODULE_INIT: 'module-init',
     POST_EVENT: 'post-event',
     PRE_EVENT: 'pre-event',
-    RENDER_UPDATE: 'renderer-update',
     SELECTION_CHANGE: 'selection-change',
     TEXT_CHANGE: 'text-change'
   };
@@ -15787,11 +15789,13 @@ Renderer = (function() {
   Renderer.buildFrame = function(container) {
     var iframe, iframeDoc, root;
     iframe = container.ownerDocument.createElement('iframe');
-    iframe.setAttribute('frameBorder', '0');
-    iframe.setAttribute('height', '100%');
-    iframe.setAttribute('width', '100%');
-    iframe.setAttribute('title', 'Quill Rich Text Editor');
-    iframe.setAttribute('role', 'presentation');
+    DOM.setAttributes(iframe, {
+      frameBorder: '0',
+      height: '100%',
+      width: '100%',
+      title: 'Quill Rich Text Editor',
+      role: 'presentation'
+    });
     container.appendChild(iframe);
     iframeDoc = iframe.contentWindow.document;
     iframeDoc.open();
@@ -15802,10 +15806,9 @@ Renderer = (function() {
     return [root, iframe];
   };
 
-  function Renderer(container, emitter, options) {
+  function Renderer(container, options) {
     var _ref;
     this.container = container;
-    this.emitter = emitter;
     this.options = options != null ? options : {};
     this.container.innerHTML = '';
     _ref = Renderer.buildFrame(this.container), this.root = _ref[0], this.iframe = _ref[1];
@@ -15839,22 +15842,9 @@ Renderer = (function() {
     var style;
     style = this.root.ownerDocument.createElement('style');
     style.type = 'text/css';
-    if (!_.isString(css)) {
-      css = Renderer.objToCss(css);
-    }
-    if (style.styleSheet != null) {
-      style.styleSheet.cssText = css;
-    } else {
-      style.appendChild(this.root.ownerDocument.createTextNode(css));
-    }
-    return _.defer((function(_this) {
-      return function() {
-        _this.root.ownerDocument.querySelector('head').appendChild(style);
-        if (_this.emitter != null) {
-          return _this.emitter.emit(_this.emitter.constructor.events.RENDER_UPDATE, css);
-        }
-      };
-    })(this));
+    css = Renderer.objToCss(css);
+    style.appendChild(this.root.ownerDocument.createTextNode(css));
+    return this.root.ownerDocument.head.appendChild(style);
   };
 
   return Renderer;
