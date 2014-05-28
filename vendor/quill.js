@@ -11943,7 +11943,7 @@ module.exports=_dereq_('Fq7WE+');
 },{}],18:[function(_dereq_,module,exports){
 module.exports={
   "name": "quilljs",
-  "version": "0.13.5-pre",
+  "version": "0.13.7",
   "description": "Cross browser rich text editor",
   "author": "Jason Chen <jhchen7@gmail.com>",
   "homepage": "http://quilljs.com",
@@ -12065,7 +12065,7 @@ Document = (function() {
 
   Document.prototype.findLine = function(node) {
     var line;
-    while ((node != null) && node.parentNode !== this.root) {
+    while ((node != null) && (DOM.BLOCK_TAGS[node.tagName] == null)) {
       node = node.parentNode;
     }
     line = node != null ? this.lineMap[node.id] : null;
@@ -12143,14 +12143,17 @@ Document = (function() {
     var lineNode, lines, _results;
     lines = this.lines.toArray();
     lineNode = this.root.firstChild;
+    if ((lineNode != null) && (DOM.LIST_TAGS[lineNode.tagName] != null)) {
+      lineNode = lineNode.firstChild;
+    }
     _.each(lines, (function(_this) {
       return function(line, index) {
-        var newLine;
+        var newLine, _ref;
         while (line.node !== lineNode) {
-          if (line.node.parentNode === _this.root) {
+          if (line.node.parentNode === _this.root || ((_ref = line.node.parentNode) != null ? _ref.parentNode : void 0) === _this.root) {
             lineNode = Normalizer.normalizeLine(lineNode);
             newLine = _this.insertLineBefore(lineNode, line);
-            lineNode = lineNode.nextSibling;
+            lineNode = Utils.getNextLineNode(lineNode, _this.root);
           } else {
             return _this.removeLine(line);
           }
@@ -12159,21 +12162,25 @@ Document = (function() {
           line.node = Normalizer.normalizeLine(line.node);
           line.rebuild();
         }
-        return lineNode = line.node.nextSibling;
+        return lineNode = Utils.getNextLineNode(lineNode, _this.root);
       };
     })(this));
     _results = [];
     while (lineNode != null) {
       lineNode = Normalizer.normalizeLine(lineNode);
       this.appendLine(lineNode);
-      _results.push(lineNode = lineNode.nextSibling);
+      _results.push(lineNode = Utils.getNextLineNode(lineNode, this.root));
     }
     return _results;
   };
 
   Document.prototype.removeLine = function(line) {
-    if (line.node.parentNode === this.root) {
-      DOM.removeNode(line.node);
+    if (line.node.parentNode != null) {
+      if (DOM.LIST_TAGS[line.node.parentNode.tagName] && line.node.parentNode.childNodes.length === 1) {
+        DOM.removeNode(line.node.parentNode);
+      } else {
+        DOM.removeNode(line.node);
+      }
     }
     delete this.lineMap[line.id];
     return this.lines.remove(line);
@@ -12294,6 +12301,10 @@ DOM = {
   },
   EMBED_TAGS: {
     'IMG': 'IMG'
+  },
+  LIST_TAGS: {
+    'OL': 'OL',
+    'UL': 'UL'
   },
   VOID_TAGS: {
     'AREA': 'AREA',
@@ -12560,7 +12571,7 @@ DOM = {
     var attributes, newNode;
     newTag = newTag.toUpperCase();
     if (node.tagName === newTag) {
-      return;
+      return node;
     }
     newNode = node.ownerDocument.createElement(newTag);
     attributes = DOM.getAttributes(node);
@@ -12635,11 +12646,16 @@ DOM = {
     return ret;
   },
   wrap: function(wrapper, node) {
+    var parent;
     if (node.parentNode != null) {
       node.parentNode.insertBefore(wrapper, node);
     }
-    wrapper.appendChild(node);
-    return wrapper;
+    parent = wrapper;
+    while (parent.firstChild != null) {
+      parent = wrapper.firstChild;
+    }
+    parent.appendChild(node);
+    return parent;
   }
 };
 
@@ -12672,7 +12688,7 @@ Editor = (function() {
     this.root = this.renderer.root;
     this.doc = new Document(this.root, this.options);
     this.delta = this.doc.toDelta();
-    this.selection = new Selection(this.doc, this.quill);
+    this.selection = new Selection(this.doc, this.renderer.iframe, this.quill);
     this.timer = setInterval(_.bind(this.checkUpdate, this), this.options.pollInterval);
     this.quill.on(this.quill.constructor.events.SELECTION_CHANGE, (function(_this) {
       return function(range) {
@@ -12824,7 +12840,9 @@ Editor = (function() {
             line.insertText(offset, lineText, formatting);
             if (i < lineTexts.length - 1) {
               nextLine = _this.doc.splitLine(line, offset + lineText.length);
-              line.format(formatting);
+              _.each(_.defaults({}, formatting, line.formats), function(value, format) {
+                return line.format(format, formatting[format]);
+              });
               offset = 0;
             }
           }
@@ -12958,24 +12976,19 @@ Format = (function() {
     align: {
       type: Format.types.LINE,
       style: 'textAlign',
-      "default": 'left',
-      prepare: function(doc, value) {
-        var command;
-        switch (value) {
-          case 'left':
-            command = 'justifyLeft';
-            break;
-          case 'center':
-            command = 'justifyCenter';
-            break;
-          case 'right':
-            command = 'justifyRight';
-            break;
-          case 'justify':
-            command = 'justifyFull';
-        }
-        return doc.execCommand(command, false);
-      }
+      "default": 'left'
+    },
+    bullet: {
+      type: Format.types.LINE,
+      exclude: 'list',
+      parentTag: 'UL',
+      tag: 'LI'
+    },
+    list: {
+      type: Format.types.LINE,
+      exclude: 'bullet',
+      parentTag: 'OL',
+      tag: 'LI'
     }
   };
 
@@ -12985,12 +12998,22 @@ Format = (function() {
   }
 
   Format.prototype.add = function(node, value) {
-    var formatNode;
+    var formatNode, parentNode, _ref, _ref1;
     if (!value) {
       return this.remove(node);
     }
     if (this.value(node) === value) {
       return node;
+    }
+    if (_.isString(this.config.parentTag)) {
+      parentNode = this.document.createElement(this.config.parentTag);
+      DOM.wrap(parentNode, node);
+      if (node.parentNode.tagName === ((_ref = node.parentNode.previousSibling) != null ? _ref.tagName : void 0)) {
+        Utils.mergeNodes(node.parentNode.previousSibling, node.parentNode);
+      }
+      if (node.parentNode.tagName === ((_ref1 = node.parentNode.nextSibling) != null ? _ref1.tagName : void 0)) {
+        Utils.mergeNodes(node.parentNode, node.parentNode.nextSibling);
+      }
     }
     if (_.isString(this.config.tag)) {
       formatNode = this.document.createElement(this.config.tag);
@@ -13000,6 +13023,8 @@ Format = (function() {
         }
         DOM.removeNode(node);
         node = formatNode;
+      } else if (this.isType(Format.types.LINE)) {
+        node = DOM.switchTag(node, this.config.tag);
       } else {
         node = DOM.wrap(formatNode, node);
       }
@@ -13031,8 +13056,11 @@ Format = (function() {
   };
 
   Format.prototype.match = function(node) {
-    var c, _i, _len, _ref;
+    var c, _i, _len, _ref, _ref1;
     if (!DOM.isElement(node)) {
+      return false;
+    }
+    if (_.isString(this.config.parentTag) && ((_ref = node.parentNode) != null ? _ref.tagName : void 0) !== this.config.parentTag) {
       return false;
     }
     if (_.isString(this.config.tag) && node.tagName !== this.config.tag) {
@@ -13045,9 +13073,9 @@ Format = (function() {
       return false;
     }
     if (_.isString(this.config["class"])) {
-      _ref = DOM.getClasses(node);
-      for (_i = 0, _len = _ref.length; _i < _len; _i++) {
-        c = _ref[_i];
+      _ref1 = DOM.getClasses(node);
+      for (_i = 0, _len = _ref1.length; _i < _len; _i++) {
+        c = _ref1[_i];
         if (c.indexOf(this.config["class"]) === 0) {
           return true;
         }
@@ -13092,10 +13120,23 @@ Format = (function() {
       }
     }
     if (_.isString(this.config.tag)) {
-      node = DOM.switchTag(node, DOM.DEFAULT_INLINE_TAG);
-      if (DOM.EMBED_TAGS[this.config.tag] != null) {
-        DOM.setText(node, DOM.EMBED_TEXT);
+      if (this.isType(Format.types.LINE)) {
+        if (node.previousSibling != null) {
+          Utils.splitAncestors(node, node.parentNode.parentNode);
+        }
+        if (node.nextSibling != null) {
+          Utils.splitAncestors(node.nextSibling, node.parentNode.parentNode);
+        }
+        node = DOM.switchTag(node, DOM.DEFAULT_BLOCK_TAG);
+      } else {
+        node = DOM.switchTag(node, DOM.DEFAULT_INLINE_TAG);
+        if (DOM.EMBED_TAGS[this.config.tag] != null) {
+          DOM.setText(node, DOM.EMBED_TEXT);
+        }
       }
+    }
+    if (_.isString(this.config.parentTag)) {
+      DOM.unwrap(node.parentNode);
     }
     if (node.tagName === DOM.DEFAULT_INLINE_TAG && !node.hasAttributes()) {
       node = DOM.unwrap(node);
@@ -13110,7 +13151,7 @@ Format = (function() {
     }
     if (_.isString(this.config.attribute)) {
       return node.getAttribute(this.config.attribute) || void 0;
-    } else if (_.isString(this.config.style) && node.style[this.config.style] !== this.config["default"]) {
+    } else if (_.isString(this.config.style)) {
       return node.style[this.config.style] || void 0;
     } else if (_.isString(this.config["class"])) {
       _ref = DOM.getClasses(node);
@@ -13120,7 +13161,7 @@ Format = (function() {
           return c.slice(this.config["class"].length);
         }
       }
-    } else if (_.isString(this.config.tag) && node.tagName === this.config.tag) {
+    } else if (_.isString(this.config.tag)) {
       return true;
     }
     return void 0;
@@ -13541,7 +13582,7 @@ Line = (function(_super) {
         node = Normalizer.normalizeNode(node);
         nodeFormats = _.clone(formats);
         _.each(_this.doc.formats, function(format, name) {
-          if (format.match(node)) {
+          if (!format.isType(Format.types.LINE) && format.match(node)) {
             return nodeFormats[name] = format.value(node);
           }
         });
@@ -13611,9 +13652,16 @@ Line = (function(_super) {
     }
     _.each(formats, (function(_this) {
       return function(value, name) {
-        var format;
+        var excludeFormat, format;
         format = _this.doc.formats[name];
         if (format.isType(Format.types.LINE)) {
+          if (format.config.exclude && _this.formats[format.config.exclude]) {
+            excludeFormat = _this.doc.formats[format.config.exclude];
+            if (excludeFormat != null) {
+              _this.node = excludeFormat.remove(_this.node);
+              delete _this.formats[format.config.exclude];
+            }
+          }
           _this.node = format.add(_this.node, value);
         }
         if (value) {
@@ -14387,14 +14435,10 @@ MultiCursor = (function(_super) {
     return this.cursors = {};
   };
 
-  MultiCursor.prototype.moveCursor = function(userId, index, update) {
+  MultiCursor.prototype.moveCursor = function(userId, index) {
     var cursor;
-    if (update == null) {
-      update = true;
-    }
     cursor = this.cursors[userId];
     cursor.index = index;
-    cursor.dirty = true;
     DOM.removeClass(cursor.elem, 'hidden');
     clearTimeout(cursor.timer);
     cursor.timer = setTimeout((function(_this) {
@@ -14403,9 +14447,7 @@ MultiCursor = (function(_super) {
         return cursor.timer = null;
       };
     })(this), this.options.timeout);
-    if (update) {
-      this._updateCursor(cursor);
-    }
+    this._updateCursor(cursor);
     return cursor;
   };
 
@@ -14419,11 +14461,8 @@ MultiCursor = (function(_super) {
     return delete this.cursors[userId];
   };
 
-  MultiCursor.prototype.setCursor = function(userId, index, name, color, update) {
+  MultiCursor.prototype.setCursor = function(userId, index, name, color) {
     var cursor;
-    if (update == null) {
-      update = true;
-    }
     if (this.cursors[userId] == null) {
       this.cursors[userId] = cursor = {
         userId: userId,
@@ -14435,45 +14474,33 @@ MultiCursor = (function(_super) {
     }
     _.defer((function(_this) {
       return function() {
-        return _this.moveCursor(userId, index, update);
+        return _this.moveCursor(userId, index);
       };
     })(this));
     return this.cursors[userId];
   };
 
-  MultiCursor.prototype.shiftCursors = function(index, length, authorId, update) {
+  MultiCursor.prototype.shiftCursors = function(index, length, authorId) {
     if (authorId == null) {
       authorId = null;
     }
-    if (update == null) {
-      update = true;
-    }
-    _.each(this.cursors, (function(_this) {
+    return _.each(this.cursors, (function(_this) {
       return function(cursor, id) {
         if (!(cursor && (cursor.index > index || cursor.userId === authorId))) {
           return;
         }
-        cursor.index += Math.max(length, index - cursor.index);
-        return cursor.dirty = true;
+        return cursor.index += Math.max(length, index - cursor.index);
       };
     })(this));
-    if (update) {
-      return this.update();
-    }
   };
 
-  MultiCursor.prototype.update = function(force) {
-    if (force == null) {
-      force = false;
-    }
+  MultiCursor.prototype.update = function() {
     return _.each(this.cursors, (function(_this) {
       return function(cursor, id) {
         if (cursor == null) {
           return;
         }
-        if (cursor.dirty || force) {
-          _this._updateCursor(cursor);
-        }
+        _this._updateCursor(cursor);
         return true;
       };
     })(this));
@@ -14482,15 +14509,15 @@ MultiCursor = (function(_super) {
   MultiCursor.prototype._applyDelta = function(delta) {
     delta.apply((function(_this) {
       return function(index, text, formatting) {
-        return _this.shiftCursors(index, text.length, formatting['author'], false);
+        return _this.shiftCursors(index, text.length, formatting['author']);
       };
     })(this), (function(_this) {
       return function(index, length) {
-        return _this.shiftCursors(index, -1 * length, null, false);
+        return _this.shiftCursors(index, -1 * length, null);
       };
     })(this), (function(_this) {
       return function(index, length, name, value) {
-        return _this.shiftCursors(index, 0, null, false);
+        return _this.shiftCursors(index, 0, null);
       };
     })(this));
     return this.update();
@@ -14544,7 +14571,6 @@ MultiCursor = (function(_super) {
     if (didSplit) {
       DOM.normalize(leaf.node.parentNode);
     }
-    cursor.dirty = false;
     return this.quill.editor.selection.update('silent');
   };
 
@@ -14635,16 +14661,10 @@ Toolbar = (function() {
   };
 
   Toolbar.formats = {
-    BUTTON: {
-      'bold': 'bold',
-      'image': 'image',
-      'italic': 'italic',
-      'link': 'link',
-      'strike': 'strike',
-      'underline': 'underline'
-    },
     LINE: {
-      'align': 'align'
+      'align': 'align',
+      'bullet': 'bullet',
+      'list': 'list'
     },
     SELECT: {
       'align': 'align',
@@ -14652,6 +14672,16 @@ Toolbar = (function() {
       'color': 'color',
       'font': 'font',
       'size': 'size'
+    },
+    TOGGLE: {
+      'bold': 'bold',
+      'bullet': 'bullet',
+      'image': 'image',
+      'italic': 'italic',
+      'link': 'link',
+      'list': 'list',
+      'strike': 'strike',
+      'underline': 'underline'
     },
     TOOLTIP: {
       'image': 'image',
@@ -14685,7 +14715,10 @@ Toolbar = (function() {
           } else {
             _this.quill.formatText(range, format, value, 'user');
           }
-          return _this.setActive(format, value);
+          return _.defer(function() {
+            _this.updateActive(range);
+            return _this.setActive(format, value);
+          });
         });
       };
     })(this));
@@ -14776,14 +14809,18 @@ Toolbar = (function() {
     var leafFormats, lineFormats;
     leafFormats = this._getLeafActive(range);
     lineFormats = this._getLineActive(range);
-    return _.defaults(leafFormats, lineFormats);
+    return _.defaults({}, leafFormats, lineFormats);
   };
 
   Toolbar.prototype._getLeafActive = function(range) {
-    var contents, formatsArr, start;
+    var contents, formatsArr, line, offset, _ref;
     if (range.isCollapsed()) {
-      start = Math.max(0, range.start - 1);
-      contents = this.quill.getContents(start, range.end);
+      _ref = this.quill.editor.doc.findLineAt(range.start), line = _ref[0], offset = _ref[1];
+      if (offset === 0) {
+        contents = this.quill.getContents(range.start, range.end + 1);
+      } else {
+        contents = this.quill.getContents(range.start - 1, range.end);
+      }
     } else {
       contents = this.quill.getContents(range);
     }
@@ -14792,7 +14829,7 @@ Toolbar = (function() {
   };
 
   Toolbar.prototype._getLineActive = function(range) {
-    var firstLine, formats, formatsArr, lastLine, offset, _ref, _ref1;
+    var firstLine, formatsArr, lastLine, offset, _ref, _ref1;
     formatsArr = [];
     _ref = this.quill.editor.doc.findLineAt(range.start), firstLine = _ref[0], offset = _ref[1];
     _ref1 = this.quill.editor.doc.findLineAt(range.end), lastLine = _ref1[0], offset = _ref1[1];
@@ -14800,10 +14837,7 @@ Toolbar = (function() {
       lastLine = lastLine.next;
     }
     while ((firstLine != null) && firstLine !== lastLine) {
-      formats = {
-        'align': firstLine.formats['align']
-      };
-      formatsArr.push(firstLine.formats);
+      formatsArr.push(_.clone(firstLine.formats));
       firstLine = firstLine.next;
     }
     return this._intersectFormats(formatsArr);
@@ -14829,7 +14863,7 @@ Toolbar = (function() {
         }
       });
       _.each(missing, function(name) {
-        if (Toolbar.formats.BUTTON[name] != null) {
+        if (Toolbar.formats.TOGGLE[name] != null) {
           return delete activeFormats[name];
         } else if ((Toolbar.formats.SELECT[name] != null) && !_.isArray(activeFormats[name])) {
           return activeFormats[name] = [activeFormats[name]];
@@ -15167,7 +15201,9 @@ Normalizer = {
     'S': 'S',
     'U': 'U',
     'A': 'A',
-    'IMG': 'IMG'
+    'IMG': 'IMG',
+    'UL': 'UL',
+    'LI': 'LI'
   },
   handleBreaks: function(lineNode) {
     var breaks;
@@ -15184,7 +15220,7 @@ Normalizer = {
   normalizeLine: function(lineNode) {
     lineNode = Normalizer.wrapInline(lineNode);
     lineNode = Normalizer.handleBreaks(lineNode);
-    Normalizer.pullBlocks(lineNode);
+    lineNode = Normalizer.pullBlocks(lineNode);
     lineNode = Normalizer.normalizeNode(lineNode);
     Normalizer.unwrapText(lineNode);
     return lineNode;
@@ -15232,9 +15268,7 @@ Normalizer = {
       } else if ((node.previousSibling != null) && node.tagName === node.previousSibling.tagName) {
         if (_.isEqual(DOM.getAttributes(node), DOM.getAttributes(node.previousSibling))) {
           nodes.push(node.firstChild);
-          DOM.moveChildren(node.previousSibling, node);
-          DOM.normalize(node.previousSibling);
-          _results.push(DOM.removeNode(node));
+          _results.push(Utils.mergeNodes(node.previousSibling, node));
         } else {
           _results.push(void 0);
         }
@@ -15245,23 +15279,30 @@ Normalizer = {
     return _results;
   },
   pullBlocks: function(lineNode) {
-    var curNode, _results;
+    var curNode;
     curNode = lineNode.firstChild;
-    _results = [];
     while (curNode != null) {
-      if (DOM.BLOCK_TAGS[curNode.tagName] != null) {
+      if ((DOM.BLOCK_TAGS[curNode.tagName] != null) && curNode.tagName !== 'LI') {
         if (curNode.previousSibling != null) {
           Utils.splitAncestors(curNode, lineNode.parentNode);
         }
         if (curNode.nextSibling != null) {
           Utils.splitAncestors(curNode.nextSibling, lineNode.parentNode);
         }
-        DOM.unwrap(curNode);
-        Normalizer.pullBlocks(lineNode);
+        if (DOM.LIST_TAGS[curNode.tagName] == null) {
+          DOM.unwrap(curNode);
+          Normalizer.pullBlocks(lineNode);
+        } else {
+          DOM.unwrap(curNode.parentNode);
+          if (lineNode.parentNode == null) {
+            lineNode = curNode;
+          }
+        }
+        break;
       }
-      _results.push(curNode = curNode.nextSibling);
+      curNode = curNode.nextSibling;
     }
-    return _results;
+    return lineNode;
   },
   stripComments: function(html) {
     return html = html.replace(/<!--[\s\S]*?-->/g, '');
@@ -15385,7 +15426,7 @@ Quill = (function(_super) {
   Quill.Theme = Themes;
 
   Quill.DEFAULTS = {
-    formats: ['align', 'bold', 'italic', 'strike', 'underline', 'color', 'background', 'font', 'size', 'link', 'image'],
+    formats: ['align', 'bold', 'italic', 'strike', 'underline', 'color', 'background', 'font', 'size', 'link', 'image', 'bullet', 'list'],
     modules: {
       'keyboard': true,
       'paste-manager': true,
@@ -15510,9 +15551,6 @@ Quill = (function(_super) {
   Quill.prototype.formatText = function(start, end, name, value, source) {
     var delta, formats, _ref;
     _ref = this._buildParams(start, end, name, value, source), start = _ref[0], end = _ref[1], formats = _ref[2], source = _ref[3];
-    if (!(end > start)) {
-      return;
-    }
     formats = _.reduce(formats, (function(_this) {
       return function(formats, value, name) {
         var format;
@@ -15609,7 +15647,11 @@ Quill = (function(_super) {
     if (!(range != null ? range.isCollapsed() : void 0)) {
       return;
     }
-    return format.prepare(value);
+    if (format.isType(Format.types.LINE)) {
+      return this.formatLine(range, name, value, Quill.sources.USER);
+    } else {
+      return format.prepare(value);
+    }
   };
 
   Quill.prototype.setContents = function(delta, source) {
@@ -15855,7 +15897,7 @@ module.exports = Renderer;
 
 
 },{"./dom":20,"./normalizer":38,"./utils":44,"lodash":"4HJaAd"}],41:[function(_dereq_,module,exports){
-var DOM, Leaf, Range, Selection, _;
+var DOM, Leaf, Range, Selection, Utils, _;
 
 _ = _dereq_('lodash');
 
@@ -15865,9 +15907,12 @@ Leaf = _dereq_('./leaf');
 
 Range = _dereq_('./lib/range');
 
+Utils = _dereq_('./utils');
+
 Selection = (function() {
-  function Selection(doc, emitter) {
+  function Selection(doc, iframe, emitter) {
     this.doc = doc;
+    this.iframe = iframe;
     this.emitter = emitter;
     this.document = this.doc.root.ownerDocument;
     this.range = this.getRange();
@@ -15875,7 +15920,13 @@ Selection = (function() {
   }
 
   Selection.prototype.checkFocus = function() {
-    return this.document.activeElement === this.doc.root;
+    if (this.document.activeElement !== this.doc.root) {
+      return false;
+    }
+    if ((document.activeElement != null) && document.activeElement.tagName === 'IFRAME') {
+      return document.activeElement === this.iframe;
+    }
+    return true;
   };
 
   Selection.prototype.getRange = function() {
@@ -15888,10 +15939,10 @@ Selection = (function() {
       return null;
     }
     start = this._positionToIndex(nativeRange.startContainer, nativeRange.startOffset);
-    if (nativeRange.endContainer !== nativeRange.startContainer) {
-      end = this._positionToIndex(nativeRange.endContainer, nativeRange.endOffset);
+    if (nativeRange.startContainer === nativeRange.endContainer && nativeRange.startOffset === nativeRange.endOffset) {
+      end = start;
     } else {
-      end = start - nativeRange.startOffset + nativeRange.endOffset;
+      end = this._positionToIndex(nativeRange.endContainer, nativeRange.endOffset);
     }
     return new Range(Math.min(start, end), Math.max(start, end));
   };
@@ -15973,7 +16024,15 @@ Selection = (function() {
         return [node, 0];
       } else {
         node = node.lastChild;
-        offset = node.childNodes.length + 1;
+        if (DOM.isElement(node)) {
+          if (node.tagName === DOM.DEFAULT_BREAK_TAG || (DOM.EMBED_TAGS[node.tagName] != null)) {
+            return [node, 1];
+          } else {
+            offset = node.childNodes.length;
+          }
+        } else {
+          return [node, Utils.getNodeLength(node)];
+        }
       }
     }
   };
@@ -16062,7 +16121,7 @@ Selection = (function() {
 module.exports = Selection;
 
 
-},{"./dom":20,"./leaf":23,"./lib/range":27,"lodash":"4HJaAd"}],42:[function(_dereq_,module,exports){
+},{"./dom":20,"./leaf":23,"./lib/range":27,"./utils":44,"lodash":"4HJaAd"}],42:[function(_dereq_,module,exports){
 var DefaultTheme;
 
 DefaultTheme = (function() {
@@ -16292,6 +16351,17 @@ Utils = {
     }
     return [child, offset];
   },
+  getNextLineNode: function(curNode, root) {
+    var nextNode;
+    nextNode = curNode.nextSibling;
+    if ((nextNode == null) && curNode.parentNode !== root) {
+      nextNode = curNode.parentNode.nextSibling;
+    }
+    if ((nextNode != null) && (DOM.LIST_TAGS[nextNode.tagName] != null)) {
+      nextNode = nextNode.firstChild;
+    }
+    return nextNode;
+  },
   getNodeLength: function(node) {
     var length;
     if (node == null) {
@@ -16307,6 +16377,11 @@ Utils = {
     var version;
     version = document.documentMode;
     return version && maxVersion >= version;
+  },
+  mergeNodes: function(newNode, oldNode) {
+    DOM.moveChildren(newNode, oldNode);
+    DOM.normalize(newNode);
+    return DOM.removeNode(oldNode);
   },
   splitAncestors: function(refNode, root, force) {
     var nextNode, parentClone, parentNode;
