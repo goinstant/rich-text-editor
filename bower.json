@@ -1,7 +1,7 @@
 {
   "name": "goinstant-rich-text-editor",
   "main": "dist/rich-text-editor.js",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "homepage": "https://github.com/goinstant/rich-text-editor",
   "authors": [
     "GoInstant",
